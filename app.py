@@ -60,32 +60,67 @@ wear = st.sidebar.slider("Component Strain / Wear [min]", 0, 260, defaults[4], 1
 
 input_data = pd.DataFrame([[air_temp, proc_temp, rpm, torque, wear]], columns=feature_cols)
 
-# Prediction
+# --- RUN PREDICTION ---
 probabilities = model.predict_proba(input_data)[0]
 failure_risk = probabilities[1] * 100
+health_score = 100 - failure_risk
 
-# Main Dashboard View
-col1, col2 = st.columns([1, 1])
+# --- 1. DYNAMIC METRICS WITH DELTAS ---
+st.markdown("---")
+st.subheader("📊 Live Telemetry vs. Safe Baseline")
+col1, col2, col3, col4, col5 = st.columns(5)
 
-with col1:
-    st.subheader("Engine Risk Assessment")
-    st.metric(label="Calculated Breakdown Risk", value=f"{failure_risk:.1f}%")
-    st.progress(int(failure_risk))
+# Safe baselines for comparison
+col1.metric("Air Temp", f"{air_temp} K", f"{air_temp - 298.0:.1f} K", delta_color="inverse")
+col2.metric("Proc Temp", f"{proc_temp} K", f"{proc_temp - 308.0:.1f} K", delta_color="inverse")
+col3.metric("Engine Speed", f"{rpm} RPM", f"{rpm - 1500} RPM", delta_color="inverse")
+col4.metric("Torque", f"{torque} Nm", f"{torque - 40.0:.1f} Nm", delta_color="inverse")
+col5.metric("Tool Wear", f"{wear} min", f"{wear - 0} min", delta_color="inverse")
 
-    if failure_risk > 50:
-        st.error("⚠️ CRITICAL RISK: Structural mechanical failure imminent! Immediate maintenance required.")
-    elif failure_risk > 20:
-        st.warning("⚡ MODERATE WARNING: Sensor anomalies detected. Inspect engine strain factors.")
+# --- 2. ENGINE HEALTH & DIAGNOSTICS ---
+st.markdown("---")
+col_health, col_diag = st.columns([1, 1.5])
+
+with col_health:
+    st.subheader("Engine Health Score")
+    st.metric(label="System Vitality", value=f"{health_score:.1f} / 100")
+    
+    if health_score > 80:
+        st.success("✅ **Status: Optimal.** Engine operating safely.")
+    elif health_score > 50:
+        st.warning("⚡ **Status: Moderate Strain.** Inspect components soon.")
     else:
-        st.success("✅ SYSTEM HEALTHY: Operating within normal parameters.")
+        st.error("⚠️ **Status: Critical Risk.** Immediate maintenance required.")
 
-with col2:
-    st.subheader("Model Decision Drivers (Global Feature Importance)")
-    importances = model.feature_importances_
-    fig, ax = plt.subplots(figsize=(6, 3))
-    sns.barplot(x=importances, y=feature_cols, palette="viridis", ax=ax)
-    ax.set_xlabel("Importance Weight")
-    st.pyplot(fig)
+with col_diag:
+    st.subheader("📋 Mechanic Recommendations")
+    report_text = f"DIAGNOSTIC REPORT\nHealth Score: {health_score:.1f}/100\n\nAlerts:\n"
+    
+    if health_score > 80:
+        st.write("- All physical tolerances are within normal operating parameters.")
+        report_text += "- System operating normally.\n"
+    if torque > 60.0:
+        st.write("- 🔧 **Drivetrain:** Excessive torque. Inspect transmission fluid and differential gears.")
+        report_text += "- Drivetrain warning (High Torque)\n"
+    if rpm > 2400:
+        st.write("- 🔧 **Over-revving:** Speed exceeds safe limits. Check timing belt and valve springs.")
+        report_text += "- Engine speed warning (High RPM)\n"
+    if proc_temp - air_temp > 12.0:
+        st.write("- 🔧 **Thermal:** Cooling system failing to dissipate heat. Inspect radiator.")
+        report_text += "- Thermal warning (High Temp Delta)\n"
+    if wear > 200:
+        st.write("- 🔧 **Lifecycle:** Component strain nearing maximum limit. Replace primary wear parts.")
+        report_text += "- Component wear warning (Lifecycle limit)\n"
+
+# --- 3. EXPORTABLE REPORT ---
+st.markdown("---")
+st.download_button(
+    label="📥 Download Diagnostic Report",
+    data=report_text,
+    file_name="engine_diagnostic_report.txt",
+    mime="text/plain"
+)
+     
 
 st.subheader("Live Telemetry Data Feed")
 st.dataframe(input_data)
