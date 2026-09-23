@@ -70,12 +70,39 @@ with tab1:
     col5.metric("Wear", f"{wear} min")
 
     st.markdown("---")
-    if health_score > 80:
-        st.success(f"✅ **System Vitality: {health_score:.1f}/100** - Operating normally for a {vehicle_type}.")
-    elif health_score > 50:
-        st.warning(f"⚡ **System Vitality: {health_score:.1f}/100** - Moderate strain detected.")
-    else:
-        st.error(f"⚠️ **System Vitality: {health_score:.1f}/100** - Critical risk of mechanical failure.")
+    st.subheader("Engine Health & Root Cause Analysis")
+    col_health, col_diag = st.columns([1, 1.5])
+
+    with col_health:
+        st.metric(label="Calculated Breakdown Risk", value=f"{failure_risk:.1f}%")
+        
+        if failure_risk < 20:
+            st.success("✅ **Status: Optimal.** Safe operating tolerances.")
+        elif failure_risk < 50:
+            st.warning("⚡ **Status: Warning.** Moderate mechanical strain.")
+        else:
+            st.error("⚠️ **Status: Critical.** System failure imminent.")
+
+    with col_diag:
+        st.markdown("### 🔍 AI Failure Mode Diagnosis")
+        if failure_risk > 50:
+            # Physical Engineering Calculations
+            power_load = torque * (rpm * 0.10472)  # Mechanical power proxy
+            strain_load = torque * wear
+            
+            if proc_temp - air_temp > 10.0 and rpm < 1500:
+                st.error("**🔥 HDF (Heat Dissipation Failure):** Cooling system overwhelmed. Low RPM isn't driving the water pump adequately for the thermal load. Risk of blown head gasket.")
+            
+            if power_load > 12000:
+                st.error("**⚙️ PWF (Power Failure):** Mechanical power output (RPM × Torque) exceeds drivetrain design limits. High risk of snapped drive belts or stripped gears.")
+                
+            if strain_load > 11000:
+                st.error("**🔩 OSF (Overstrain Failure):** Metal fatigue detected. Combination of wear and torque load exceeds yield strength.")
+                
+            if wear > 200 and strain_load <= 11000:
+                st.error("**📉 TWF (Tool Wear Failure):** Component has reached operational lifespan limit. Material integrity compromised by sheer usage time.")
+        else:
+            st.write("All mechanical physics are currently within normal baseline thresholds.")
 
 # ==========================================
 # TAB 2: BATCH PROCESSING & TRIP GENERATOR
