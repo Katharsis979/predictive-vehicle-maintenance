@@ -1,0 +1,138 @@
+# =====================================================================
+# Make / model profiles — what makes the system "case by case".
+#
+# A profile tells the app:
+#   * which vehicle_type / powertrain the ML model should treat it as
+#   * the manufacturer's service intervals (used to rescale "km since
+#     service" so the generic model reads them correctly — see
+#     pvm/profiles.py: adapt_row_to_profile)
+#   * model-specific known issues to watch for (matched by trouble code)
+#   * optional manufacturer-specific OBD PIDs (mode 22) to read extra
+#     sensors such as transmission temperature
+#
+# Every number here should come from the owner's manual or an official
+# bulletin. Each profile lists its sources. Use null when you don't know a
+# value — the generic default for that powertrain is used instead.
+#
+# To add your own car, copy a block, change the fields, and restart the app.
+# =====================================================================
+
+# Generic sanity ranges for standard OBD-II readings (apply to every car
+# unless a profile overrides them). These are typical values, not
+# manufacturer specs.
+generic_checks:
+  coolant_temp_c:      {min: 75,  max: 108,  when: warm,    note: "Fully warmed-up engines usually sit between about 85 and 105 °C."}
+  fuel_trim_ltft_pct:  {min: -10, max: 10,   when: warm,    note: "Long-term fuel trim beyond ±10% means the ECU is compensating for a vacuum leak, weak injector, or sensor fault."}
+  fuel_trim_stft_pct:  {min: -15, max: 15,   when: warm,    note: "Short-term trim swings are normal; sustained large values are not."}
+  module_voltage_v:    {min: 13.4, max: 14.9, when: running, note: "With the engine running, the alternator should hold the system at roughly 13.5–14.7 V."}
+  battery_12v_resting_v: {min: 12.35, max: 13.0, when: any, note: "A rested battery below about 12.4 V is not fully charged; below 12.0 V it is deeply discharged."}
+  cranking_voltage_v:  {min: 9.6, max: 12.5, when: any,     note: "Voltage dipping below about 9.6 V while cranking points to a weak battery or poor connections."}
+
+# Reference intervals the ML model was trained with (match pvm/simulate.py).
+# A car whose manufacturer interval is longer gets its "km since service"
+# scaled down proportionally before prediction, and vice versa.
+reference_intervals_km:
+  oil:         {gasoline: 9000,   diesel: 15000, hybrid: 10000}
+  spark_plugs: {gasoline: 100000, diesel: 160000, hybrid: 100000}
+  coolant:     {gasoline: 160000, diesel: 160000, hybrid: 160000}
+
+models:
+  kia_optima_tf:
+    make: Kia
+    model: Optima
+    years: [2011, 2015]
+    generation: "TF / QF (3rd gen)"
+    vehicle_type: sedan
+    powertrain: gasoline
+    engines: ["2.4L GDI", "2.0L T-GDI (turbo)"]
+    service_intervals_km:
+      oil: null          # check your owner's manual — generic gasoline interval used until set
+      oil_severe: null
+      spark_plugs: null
+      coolant_first: null
+    known_issues:
+      - title: "Theta II engine connecting-rod bearing wear (safety recall)"
+        years: [2011, 2014]
+        engines: ["2.4L GDI", "2.0L T-GDI (turbo)"]
+        dtcs: []
+        detail: >-
+          Machining debris and uneven crankpin finish can restrict oil flow to the
+          bearings. Symptoms: a cyclic knocking noise from the engine and the check-engine
+          and/or oil-pressure light. The dealer remedy is an engine noise inspection; engines
+          that fail get a replacement long block at no charge.
+        watch: [oil_pressure, engine_knock, oil_level]
+        source: "Kia safety recall SC147 (Theta II bearing wear) — static.nhtsa.gov/odi/rcl/2017/RCRIT-17V224-7824.pdf"
+      - title: "Knock Sensor Detection System (KSDS) software"
+        years: [2014, 2015]
+        engines: ["2.4L GDI", "2.0L T-GDI (turbo)"]
+        dtcs: [P1326]
+        detail: >-
+          A software update that uses the knock sensor to detect early connecting-rod bearing
+          wear. When it triggers, the check-engine light flashes, the engine goes into limp
+          mode (rpm limited to roughly 1,800–2,000) and code P1326 is stored. Treat P1326 as
+          'stop driving and contact a Kia dealer'.
+        watch: [engine_knock]
+        source: "Kia product improvement campaign (KSDS) — carcomplaints.com TSB summary for 2014 Optima"
+    custom_pids: []
+    sources:
+      - "https://static.nhtsa.gov/odi/rcl/2017/RCRIT-17V224-7824.pdf"
+      - "https://m.carcomplaints.com/Kia/Optima/2014/tsbs/tsb-vpi1802-tsb-r1.shtml"
+
+  kia_optima_jf:
+    make: Kia
+    model: Optima
+    years: [2016, 2020]
+    generation: "JF (4th gen)"
+    vehicle_type: sedan
+    powertrain: gasoline
+    engines: ["2.4L GDI", "2.0L T-GDI (turbo)", "1.6L T-GDI (turbo)"]
+    service_intervals_km:
+      oil: 12070          # 7,500 mi (normal)
+      oil_severe: 6035    # 3,750 mi (severe: short trips, towing, extreme heat/cold)
+      spark_plugs: 156900 # 97,500 mi non-turbo; turbo engines: 67,600 km (42,000 mi)
+      spark_plugs_turbo: 67600
+      coolant_first: 193100  # 120,000 mi, then every 30,000 mi
+    known_issues: []
+    custom_pids: []
+    sources:
+      - "Oil 7,500 mi: https://www.kbb.com/kia/optima/2019/maintenance-schedules/"
+      - "Plugs / coolant: https://services.firestonecompleteautocare.com/kia/optima-2016-2020/ (verify in your owner's manual)"
+
+  kia_k5_dl3:
+    make: Kia
+    model: K5
+    years: [2021, 2026]
+    generation: "DL3 (Optima successor)"
+    vehicle_type: sedan
+    powertrain: gasoline
+    engines: ["Smartstream G2.5 GDi", "Smartstream G2.5 T-GDi (turbo)", "1.6L T-GDi (turbo)"]
+    service_intervals_km:
+      oil: 13000          # 8,000 mi / 12 months (normal)
+      oil_severe: 8000    # 5,000 mi / 6 months
+      spark_plugs: 156000 # 96,000 mi for G2.5 GDi; T-GDi: 78,000 km (48,000 mi)
+      spark_plugs_turbo: 78000
+      coolant_first: 195000  # 120,000 mi / 120 months
+    known_issues: []
+    custom_pids: []
+    sources:
+      - "https://ownersmanual.kia.com/full_webhelp/DL3/2025/en_US/topics/chapter8_4.html"
+
+# ---------------------------------------------------------------------
+# Manufacturer-specific PIDs (optional, advanced)
+#
+# Standard OBD-II (mode 01) only covers emissions-related sensors. Things
+# like transmission fluid temperature, oil pressure or tire pressures live
+# in manufacturer "mode 22" PIDs that differ by make, model and year.
+# If you find verified PIDs for your car (e.g. from your scan tool's
+# extended-PID list), add them to the profile like this:
+#
+#   custom_pids:
+#     - column: transmission_temp_c     # must match a feature name in vehicle_schema.yaml
+#       command: "2101"                 # hex request, without spaces
+#       header: "7E1"                   # ECU address (7E0 engine, 7E1 transmission)
+#       bytes: 62                       # expected response length
+#       formula: "B[18] - 40"           # Python expression; B is the list of data bytes
+#
+# Wrong PIDs just return nothing, but always verify a value against a
+# known gauge before trusting it.
+# ---------------------------------------------------------------------

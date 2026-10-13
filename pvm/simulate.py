@@ -155,7 +155,7 @@ def compute_health(df: pd.DataFrame, rng: np.random.Generator | None = None, def
     payload = _f(df, "payload_pct") / 100
     ambient = _f(df, "ambient_temp_c", 18)
     hot = np.clip((ambient - 22) / 15, 0, 1)        # 0 at 22 °C, 1 at 37 °C+
-    cold = np.clip((5 - ambient) / 20, 0, 1)        # 0 at 5 °C, 1 at -15 °C
+
     stress = 1 + 0.6 * aggr + 0.5 * payload
     # Commercial vehicles use heavier-duty parts rated for far more km.
     duty = np.select([vt == "heavy_truck", vt == "delivery_van"], [3.0, 1.6], 1.0)

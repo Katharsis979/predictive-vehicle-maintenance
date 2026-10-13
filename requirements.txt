@@ -6,4 +6,8 @@ altair>=5
 matplotlib>=3.8
 pyyaml>=6
 joblib>=1.3
+obd>=0.7.2              # python-OBD: talks to ELM327 adapters
+pyserial>=3.5
 pytest>=8
+# Optional, for testing without a car (non-commercial license):
+# ELM327-emulator
