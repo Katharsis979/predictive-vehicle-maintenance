@@ -1,0 +1,117 @@
+# =====================================================================
+# Vehicle schema — the single source of truth for every parameter.
+#
+# The ML model itself does NOT need this file: it learns from whatever
+# columns are in the training CSV. This file tells the *app* how to show
+# each parameter (label, unit, slider range) and which powertrains it
+# applies to, and tells the *model* which failure modes apply to which
+# vehicles.
+#
+# To add a new parameter:
+#   1. Add a column with that name to your training data (or to
+#      pvm/simulate.py if you're using simulated data).
+#   2. Add an entry below so the dashboard gets a slider for it.
+#   3. Retrain:  python -m pvm.train
+# =====================================================================
+
+powertrains: [gasoline, diesel, hybrid, electric]
+
+vehicle_types:
+  compact:      {label: "Compact car",        powertrain: gasoline, mass_kg: 1300, annual_km: 15000}
+  sedan:        {label: "Midsize sedan",      powertrain: gasoline, mass_kg: 1550, annual_km: 17000}
+  suv:          {label: "SUV",                powertrain: gasoline, mass_kg: 2000, annual_km: 18000}
+  pickup:       {label: "Pickup truck",       powertrain: gasoline, mass_kg: 2300, annual_km: 20000}
+  delivery_van: {label: "Delivery van",       powertrain: diesel,   mass_kg: 2800, annual_km: 35000}
+  heavy_truck:  {label: "Heavy-duty truck",   powertrain: diesel,   mass_kg: 9000, annual_km: 60000}
+  hybrid:       {label: "Hybrid sedan",       powertrain: hybrid,   mass_kg: 1600, annual_km: 18000}
+  ev:           {label: "Electric vehicle",   powertrain: electric, mass_kg: 2000, annual_km: 16000}
+
+climates: [hot, temperate, cold]
+
+# ---------------------------------------------------------------------
+# Failure modes the model predicts. Each becomes a target column
+# "fail_<name>" = 1 if that component fails within the next 5,000 km.
+# ---------------------------------------------------------------------
+components:
+  cooling_system:
+    label: "Cooling system"
+    powertrains: [gasoline, diesel, hybrid]
+    action: "Pressure-test the cooling system, inspect the water pump, hoses and radiator, and flush the coolant."
+  engine_oil:
+    label: "Engine oil / lubrication"
+    powertrains: [gasoline, diesel, hybrid]
+    action: "Change the oil and filter. If pressure stays low afterward, check the oil pump and bearings."
+  battery_12v:
+    label: "12V battery"
+    powertrains: [gasoline, diesel, hybrid, electric]
+    action: "Load-test the 12V battery and charging system; replace the battery if it fails."
+  hv_battery:
+    label: "High-voltage battery"
+    powertrains: [hybrid, electric]
+    action: "Run a battery-pack health check at a dealer; look for weak cell modules and cooling faults."
+  brakes:
+    label: "Brakes"
+    powertrains: [gasoline, diesel, hybrid, electric]
+    action: "Inspect pads and rotors, replace pads if under 3 mm, and flush the brake fluid if moisture is high."
+  tires:
+    label: "Tires"
+    powertrains: [gasoline, diesel, hybrid, electric]
+    action: "Check tread depth and pressures, look for slow leaks or sidewall cracking, and replace worn tires."
+  transmission:
+    label: "Transmission"
+    powertrains: [gasoline, diesel, hybrid]
+    action: "Check fluid level and condition, service the transmission fluid, and scan for slip-related codes."
+  fuel_ignition:
+    label: "Fuel & ignition"
+    powertrains: [gasoline, diesel, hybrid]
+    action: "Replace spark plugs/coils (gas) or test injectors (diesel); check fuel trims for vacuum leaks."
+
+# ---------------------------------------------------------------------
+# Input parameters. group = which part of the dashboard it appears in.
+# powertrains: which vehicles have this sensor (omit = all).
+# ---------------------------------------------------------------------
+features:
+  # --- Vehicle & usage profile ---
+  - {name: vehicle_age_years,   group: vehicle, label: "Vehicle age",            unit: "years", min: 0,   max: 25,     step: 0.5,  help: "Years since the vehicle was built."}
+  - {name: odometer_km,         group: vehicle, label: "Odometer",               unit: "km",    min: 0,   max: 1200000, step: 1000, help: "Total distance driven."}
+  - {name: driving_aggression,  group: vehicle, label: "Driving aggression",     unit: "0–1",   min: 0,   max: 1,      step: 0.05, help: "0 = very gentle, 1 = hard acceleration and braking."}
+  - {name: payload_pct,         group: vehicle, label: "Typical payload / towing", unit: "% of max", min: 0, max: 100, step: 5,   help: "How heavily the vehicle is usually loaded."}
+  - {name: ambient_temp_c,      group: vehicle, label: "Ambient temperature",    unit: "°C",    min: -30, max: 50,     step: 1,    help: "Outside air temperature right now."}
+  - {name: dc_fast_charge_pct,  group: vehicle, label: "DC fast-charge share",   unit: "%",     min: 0,   max: 100,    step: 5,    powertrains: [electric], help: "Share of charging done on DC fast chargers (stresses the pack)."}
+
+  # --- Maintenance history ---
+  - {name: km_since_oil_change,      group: service, label: "Since oil change",          unit: "km",     min: 0, max: 40000,  step: 500,  powertrains: [gasoline, diesel, hybrid]}
+  - {name: km_since_coolant_service, group: service, label: "Since coolant service",     unit: "km",     min: 0, max: 300000, step: 1000, powertrains: [gasoline, diesel, hybrid]}
+  - {name: km_since_brake_service,   group: service, label: "Since brake service",       unit: "km",     min: 0, max: 150000, step: 1000}
+  - {name: km_since_trans_service,   group: service, label: "Since transmission service", unit: "km",    min: 0, max: 300000, step: 1000, powertrains: [gasoline, diesel, hybrid]}
+  - {name: km_since_tuneup,          group: service, label: "Since plugs / injectors",   unit: "km",     min: 0, max: 300000, step: 1000, powertrains: [gasoline, diesel, hybrid]}
+  - {name: km_on_tires,              group: service, label: "Km on current tires",       unit: "km",     min: 0, max: 120000, step: 1000}
+  - {name: tire_age_months,          group: service, label: "Tire age",                  unit: "months", min: 0, max: 144,    step: 1}
+  - {name: battery_12v_age_months,   group: service, label: "12V battery age",           unit: "months", min: 0, max: 120,    step: 1}
+
+  # --- Operating point when the reading was taken ---
+  - {name: speed_kph,        group: operating, label: "Speed",       unit: "km/h", min: 0,  max: 160,   step: 1}
+  - {name: engine_rpm,       group: operating, label: "Engine/motor speed", unit: "rpm", min: 0, max: 16000, step: 50}
+  - {name: engine_load_pct,  group: operating, label: "Engine/motor load",  unit: "%",   min: 0, max: 100,   step: 1}
+
+  # --- Live sensor readings (OBD-II / BMS / TPMS) ---
+  - {name: coolant_temp_c,          group: sensor, label: "Coolant temp",            unit: "°C",  min: 40,  max: 140,  step: 0.5, powertrains: [gasoline, diesel, hybrid]}
+  - {name: oil_temp_c,              group: sensor, label: "Oil temp",                unit: "°C",  min: 40,  max: 160,  step: 0.5, powertrains: [gasoline, diesel, hybrid]}
+  - {name: oil_pressure_kpa,        group: sensor, label: "Oil pressure",            unit: "kPa", min: 20,  max: 600,  step: 5,   powertrains: [gasoline, diesel, hybrid]}
+  - {name: battery_12v_resting_v,   group: sensor, label: "12V resting voltage",     unit: "V",   min: 11,  max: 13.2, step: 0.01}
+  - {name: cranking_voltage_v,      group: sensor, label: "12V cranking/load voltage", unit: "V", min: 7,   max: 12,   step: 0.05}
+  - {name: hv_battery_soh_pct,      group: sensor, label: "HV battery state of health", unit: "%", min: 50, max: 100, step: 0.5, powertrains: [hybrid, electric]}
+  - {name: hv_cell_spread_mv,       group: sensor, label: "HV cell voltage spread",  unit: "mV",  min: 0,   max: 150,  step: 1,   powertrains: [hybrid, electric]}
+  - {name: hv_battery_temp_c,       group: sensor, label: "HV battery temp",         unit: "°C",  min: -20, max: 70,   step: 0.5, powertrains: [hybrid, electric]}
+  - {name: brake_pad_mm,            group: sensor, label: "Brake pad thickness",     unit: "mm",  min: 0,   max: 13,   step: 0.1, help: "Not every car has pad-wear sensors — leave blank if unknown."}
+  - {name: brake_fluid_moisture_pct, group: sensor, label: "Brake fluid moisture",   unit: "%",   min: 0,   max: 8,    step: 0.1}
+  - {name: tire_tread_mm,           group: sensor, label: "Tire tread depth (min)",  unit: "mm",  min: 0,   max: 10,   step: 0.1}
+  - {name: tire_pressure_min_kpa,   group: sensor, label: "Lowest tire pressure",    unit: "kPa", min: 100, max: 300,  step: 1}
+  - {name: tire_pressure_spread_kpa, group: sensor, label: "Tire pressure spread",   unit: "kPa", min: 0,   max: 120,  step: 1}
+  - {name: transmission_temp_c,     group: sensor, label: "Transmission temp",       unit: "°C",  min: 40,  max: 160,  step: 0.5, powertrains: [gasoline, diesel, hybrid]}
+  - {name: trans_slip_events,       group: sensor, label: "Shift-slip events (last 100 km)", unit: "count", min: 0, max: 40, step: 1, powertrains: [gasoline, diesel, hybrid]}
+  - {name: misfire_count,           group: sensor, label: "Misfires (last 100 km)",  unit: "count", min: 0, max: 80, step: 1, powertrains: [gasoline, diesel, hybrid]}
+  - {name: fuel_trim_ltft_pct,      group: sensor, label: "Long-term fuel trim",     unit: "%",   min: -25, max: 25,   step: 0.5, powertrains: [gasoline, diesel, hybrid]}
+  - {name: exhaust_gas_temp_c,      group: sensor, label: "Exhaust gas temp",        unit: "°C",  min: 150, max: 900,  step: 5,   powertrains: [diesel]}
+  - {name: vibration_rms_g,         group: sensor, label: "Chassis vibration (RMS)", unit: "g",   min: 0,   max: 0.6,  step: 0.005}
+  - {name: dtc_count,               group: sensor, label: "Active trouble codes",    unit: "count", min: 0, max: 15, step: 1}
