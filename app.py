@@ -13,9 +13,11 @@ import streamlit as st
 
 from pvm.model import MaintenanceModel
 from pvm.schema import component_names, features_for, load_schema, target_name
-from pvm.simulate import (CONFIG_COLS, FAILURE_HORIZON_KM, compute_health, generate_fleet, project_forward,
+from pvm.simulate import (CONFIG_COLS, FAILURE_HORIZON_KM, generate_fleet, project_forward,
                           sample_configs, simulate_from_config)
-from pvm.train import load_or_train, print_report  # noqa: F401  (print_report handy in a REPL)
+from pvm.train import load_or_train
+from pvm.ui import comp_label, feat_meta, fmt, render_diagnosis
+from pvm.ui_obd import render_obd_tab
 
 st.set_page_config(page_title="Predictive Vehicle Maintenance", page_icon="🚗", layout="wide")
 SCHEMA = load_schema()
@@ -32,23 +34,6 @@ def get_model() -> MaintenanceModel:
 
 
 model = get_model()
-
-
-def comp_label(target: str) -> str:
-    return COMPONENTS.get(target.removeprefix("fail_"), {}).get("label", target)
-
-
-def feat_meta(name: str) -> dict:
-    return next((f for f in SCHEMA["features"] if f["name"] == name), {"label": name, "unit": ""})
-
-
-def fmt(v, name: str) -> str:
-    if pd.isna(v):
-        return "—"
-    unit = feat_meta(name).get("unit", "")
-    v = float(v)
-    s = f"{v:,.0f}" if abs(v) >= 100 else f"{v:,.2f}".rstrip("0").rstrip(".")
-    return f"{s} {unit}".strip()
 
 
 # =====================================================================
@@ -107,11 +92,15 @@ for c in CONFIG_COLS:  # columns this powertrain doesn't have -> blank
 st.title("🚗 Predictive Vehicle Maintenance")
 st.caption(f"Machine-learning models predict which components are likely to fail in the next "
            f"{FAILURE_HORIZON_KM:,} km, estimate remaining life, and flag unusual readings.")
-tab_live, tab_forecast, tab_fleet, tab_train, tab_how = st.tabs(
-    ["🩺 Diagnostics", "📈 Forecast", "🚚 Fleet analysis", "🧪 Train on your data", "🧠 How the AI works"])
+tab_obd, tab_live, tab_forecast, tab_fleet, tab_train, tab_how = st.tabs(
+    ["🔌 Live OBD", "🩺 Diagnostics", "📈 Forecast", "🚚 Fleet analysis", "🧪 Train on your data",
+     "🧠 How the AI works"])
+
+with tab_obd:
+    render_obd_tab(model)
 
 # =====================================================================
-# TAB 1 — Live diagnostics
+# TAB 2 — What-if diagnostics (simulated or manual readings)
 # =====================================================================
 with tab_live:
     sensor_feats = features_for(powertrain, "sensor")
@@ -145,76 +134,7 @@ with tab_live:
             for i, f in enumerate(sensor_feats):
                 cols[i % 4].metric(f["label"], fmt(row[f["name"]].iloc[0], f["name"]))
 
-    pred = model.predict(row).iloc[0]
-    risk_cols = [c for c in pred.index if c.startswith("risk_") and pd.notna(pred[c])]
-
-    c1, c2, c3 = st.columns(3)
-    overall = pred["overall_risk"]
-    c1.metric("Chance something fails (next 5,000 km)", f"{overall:.0%}")
-    if "rul_p50" in pred:
-        c2.metric("Est. km until next repair needed", f"{pred['rul_p50']:,.0f} km",
-                  help=f"80% range: {pred['rul_p10']:,.0f} – {pred['rul_p90']:,.0f} km")
-    c3.metric("Anomaly score", f"{pred['anomaly_pct']:.0f} / 100",
-              help="How unusual these readings are compared with healthy vehicles. "
-                   "Above ~95 means 'unlike anything healthy' even if no known failure matches.")
-    if overall < 0.2:
-        st.success("**Status: Healthy.** No component is near its failure threshold.")
-    elif overall < 0.5:
-        st.warning("**Status: Watch.** At least one component is wearing — plan service soon.")
-    else:
-        st.error("**Status: Service needed.** One or more components are likely to fail soon.")
-    if pred["anomaly_pct"] > 97:
-        st.info("🔎 These readings are unusual compared with healthy vehicles. Worth a manual inspection even "
-                "if no specific component is flagged.")
-
-    # ---- risk by component ----
-    rdf = pd.DataFrame({
-        "component": [comp_label(c[5:]) for c in risk_cols],
-        "target": [c[5:] for c in risk_cols],
-        "risk": [pred[c] for c in risk_cols],
-        "threshold": [model.thresholds_[c[5:]] for c in risk_cols],
-    }).sort_values("risk", ascending=False)
-    rdf["level"] = np.where(rdf["risk"] >= rdf["threshold"], "Alert", np.where(rdf["risk"] >= 0.1, "Watch", "OK"))
-    chart = alt.Chart(rdf).mark_bar().encode(
-        x=alt.X("risk:Q", title="Probability of failure in next 5,000 km", scale=alt.Scale(domain=[0, 1]),
-                axis=alt.Axis(format="%")),
-        y=alt.Y("component:N", sort="-x", title=None),
-        color=alt.Color("level:N", scale=alt.Scale(domain=["OK", "Watch", "Alert"],
-                                                   range=["#3a9d5d", "#e0a526", "#d1495b"]), legend=None),
-        tooltip=["component", alt.Tooltip("risk:Q", format=".1%"), alt.Tooltip("threshold:Q", format=".0%")],
-    ).properties(height=34 * len(rdf) + 20)
-    st.subheader("Risk by component")
-    st.altair_chart(chart, width="stretch")
-
-    # ---- explanations ----
-    st.subheader("Why? — root-cause explanation")
-    st.caption("For each input, the model asks: *if this vehicle had the value a typical healthy "
-               f"{powertrain} vehicle has, how would the risk change?* Big changes = main causes.")
-    flagged = rdf[rdf["level"] != "OK"]
-    show = flagged if not flagged.empty else rdf.head(1)
-    for _, r in show.iterrows():
-        comp = r["target"].removeprefix("fail_")
-        with st.expander(f"{r['component']} — {r['risk']:.0%} risk", expanded=r["level"] == "Alert"):
-            ex = model.explain(row, r["target"], top_k=6)
-            ex = ex[ex["contribution"].abs() >= 0.005]
-            if ex.empty:
-                st.write("No single input stands out — the risk comes from many small factors.")
-            for _, e in ex.iterrows():
-                arrow = "⬆️ raises" if e["contribution"] > 0 else "⬇️ lowers"
-                st.markdown(f"- **{feat_meta(e['feature'])['label']}** = {fmt(e['value'], e['feature'])} "
-                            f"(healthy typical: {fmt(e['typical_healthy'], e['feature'])}) — {arrow} risk by "
-                            f"**{abs(e['contribution']) * 100:.0f} pts**")
-            st.markdown(f"**Recommended action:** {COMPONENTS[comp]['action']}")
-
-    if hidden is not None:
-        with st.expander("🎓 Peek behind the curtain: the simulator's hidden 'true' health"):
-            st.caption("The model never sees these numbers — it has to infer them from sensors and history. "
-                       "Compare them with the risks above to judge how well it does.")
-            truth = pd.DataFrame({"component": [comp_label(c.removeprefix("_health_")) for c in hidden.columns],
-                                  "true health": hidden.iloc[0].values})
-            truth = truth[truth["component"].isin(rdf["component"])]
-            st.dataframe(truth.style.format({"true health": "{:.0%}"}).background_gradient(
-                cmap="RdYlGn", vmin=0, vmax=1, subset=["true health"]), hide_index=True)
+    render_diagnosis(model, row, powertrain, hidden=hidden, key="sim")
 
 # =====================================================================
 # TAB 2 — Forecast

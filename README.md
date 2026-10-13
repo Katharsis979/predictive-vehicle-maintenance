@@ -21,11 +21,66 @@ pytest -q                     # run the tests
 
 | Tab | What it does |
 |---|---|
+| **Live OBD** | Connect to a real car through an ELM327 adapter (or a built-in virtual car, or a phone-app log), watch live gauges and trouble codes, and get a diagnosis tuned to your exact make/model. |
 | **Diagnostics** | Pick a vehicle, set its history, and read live (simulated or manual) sensors. See risk per component, remaining life, anomaly score, and a root-cause explanation for each alert. |
 | **Forecast** | "What if I keep driving without maintenance?" — risk curves vs km and a suggested service schedule. |
 | **Fleet analysis** | Score hundreds of vehicles at once (generated or uploaded CSV), rank them by priority, download results. If the CSV contains real outcomes, it grades the model. |
 | **Train on your data** | Upload any table, choose the outcome columns, and train a new model on whatever columns you have. |
 | **How the AI works** | Test metrics, what each metric means, feature importance, and a comparison against a perfect-knowledge "oracle". |
+
+## Live OBD-II (your actual car)
+
+**What you need:** an ELM327-compatible OBD-II adapter (USB, Bluetooth Classic, or Wi-Fi) and a laptop
+running the app locally (`streamlit run app.py`). A cloud-hosted copy of the app can't reach hardware in your car.
+
+1. Plug the adapter into the OBD-II port (under the dashboard, left of the steering column) and turn the
+   ignition **on**.
+2. Connect the laptop: USB just works; Bluetooth must be paired first (PIN is usually 1234 or 0000);
+   for Wi-Fi, join the adapter's network (most use `192.168.0.10:35000`).
+3. In the **Live OBD** tab choose *OBD-II adapter* → *Connect*. With the engine idling, wait for the
+   coolant to pass 75 °C before trusting the diagnosis.
+
+No adapter yet? Pick **Simulated car** — a virtual 2018 Kia Optima you can give faults
+(overheating, weak battery, vacuum leak, misfire, bad alternator) — or upload a CSV from Torque Pro,
+Car Scanner or OBD Fusion.
+
+**What the car can and can't tell you.** Standard OBD-II (mode 01) covers emissions-related sensors:
+rpm, speed, load, coolant temp, fuel trims, voltage, trouble codes, and sometimes oil temp and odometer.
+Brake-pad thickness, tire tread, oil pressure and transmission temperature are not in the standard. They
+need manufacturer-specific PIDs (add them per model in `config/vehicle_models.yaml`) or a manual check.
+The app shows exactly how many of the model's inputs your car supplied, and the model treats the rest as unknown.
+
+The diagnosis combines four layers:
+
+| Layer | What it catches | Where |
+|---|---|---|
+| Trouble codes | Faults the car's computer already detected (e.g. P0217 overheating → cooling system) | `pvm/obd_live.py` |
+| Range checks | Readings outside normal limits (low cranking voltage, fuel trim > ±10 %, …) | `config/vehicle_models.yaml` |
+| Fleet AI model | Gradual wear, from mileage + service history + sensor patterns | `pvm/model.py` |
+| Personal baseline | Drift from what *your* car normally does in the same conditions | `pvm/baseline.py` |
+
+### Case by case: make/model profiles
+
+The VIN is read from the car (or typed in) and decoded. It is checked with the VIN check-digit algorithm and
+looked up with NHTSA's free vPIC service. If a profile exists for that make/model/year, the app uses it:
+
+* **Manufacturer service intervals.** "Km since oil change" is rescaled to the interval the model was trained on.
+  For example, 6,000 km on a Kia with a 12,070 km interval reads like 4,470 km on a 9,000 km-interval car.
+* **Known issues.** For example, the 2011–2015 Optima's Theta II bearing recall and the KSDS code P1326,
+  which is flagged instantly if stored.
+* **Extra PIDs** for sensors the standard doesn't cover.
+
+Included: Kia Optima 2011–2015 and 2016–2020, and Kia K5 2021+. Every value is cited in the YAML. To add a
+car, copy a block, fill it in from the owner's manual, and restart. Cars without a profile fall back to the
+closest generic type.
+
+### Learning your car's "normal"
+
+Save a few drives (at least 120 warm-engine samples), then click **Learn this car's normal**. For each signal,
+a small model is trained on *your* car's data to predict what that signal should be at the current rpm,
+speed, load and temperature. Later drives are compared against it, so a coolant temperature that is 6 °C higher
+than usual for those conditions gets flagged, even if it's still inside the generic "normal" range. Logs and
+baselines are stored privately in `data/vehicles/` (git-ignored).
 
 ## How it works
 
@@ -93,6 +148,11 @@ pvm/simulate.py              physics-inspired fleet simulator
 pvm/features.py              engineered features
 pvm/model.py                 MaintenanceModel: train / predict / explain / save
 pvm/train.py                 command-line training
+pvm/obd_live.py              OBD-II sources (adapter, virtual car, phone logs), polling, DTC mapping
+pvm/profiles.py              VIN decoding, make/model profiles, interval adaptation, range checks
+pvm/baseline.py              per-vehicle "normal" model and storage
+pvm/ui.py, pvm/ui_obd.py     dashboard components
+config/vehicle_models.yaml   per-model service intervals, known issues, custom PIDs
 models/                      trained model + metrics.json
 tests/                       pytest suite
 ```
